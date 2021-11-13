@@ -165,7 +165,7 @@ def JuneScheme(x, num_format = False):
 # Function that constructs the portfolios per Fama-French methodology 
 # along with their market cap weighted returns.
 def FFPortfolios(ret_data, firmchars, entity_id, time_id, ret_time_id, characteristics, lagged_periods, \
-                 N_portfolios, quantile_filters, ffdir, conditional_sort = True, weight_col = 'CAP_W'):
+                 N_portfolios, quantile_filters, ffdir, conditional_sort = True, weight_col = 'CAP_W', return_col = 'RET'):
     """
     
     Parameters
@@ -202,6 +202,9 @@ def FFPortfolios(ret_data, firmchars, entity_id, time_id, ret_time_id, character
     weight_col : str, Default='CAP_W'
         The column used for weighting the returns in a portfolio. Default is 'CAP_W' which
         corresponds to the market capitalization of the previous period as defined by 'time_id'.
+    return_col : str, Default='RET'
+        The column of ret_data dataframe that corresponds to the returns of entities. Default is 
+        'RET' which is the name of the return column in CRSP.
 
     Returns
     -------
@@ -302,7 +305,7 @@ def FFPortfolios(ret_data, firmchars, entity_id, time_id, ret_time_id, character
     # The inner merging is taking care of stocks that should be excluded from the formation of the portfolios
     ret_ports = pd.merge(ret_data, ports, how = 'inner', on = [time_id, entity_id], suffixes = ('', '_2') )
     
-    char_ports = ret_ports.groupby(by = [port_name, ret_time_id] ).agg( { 'RET' : lambda x: WeightedMean(x, df = ret_ports, weights = weight_col) } ).unstack(level=0)
+    char_ports = ret_ports.groupby(by = [port_name, ret_time_id] ).agg( { return_col : lambda x: WeightedMean(x, df = ret_ports, weights = weight_col) } ).unstack(level=0)
     # Rename the columns by keeping only the second element of their names
     char_ports.columns = [x[1] for x in char_ports.columns]
     
