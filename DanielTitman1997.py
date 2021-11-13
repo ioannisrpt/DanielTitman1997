@@ -4,7 +4,7 @@
 
 
 """
-Replicate the procedure of creating pre-formation and constant-allocation Fama-French factors as described 
+I replicate the procedure of creating pre-formation and constant-allocation Fama-French factors as described 
 in Daniel & Titman (1997).
 
 The paper can be found at:
@@ -13,8 +13,10 @@ https://www.jstor.org/stable/2329554?seq=1#metadata_info_tab_contents
 
 Steps to construct these new Fama-French factors
 ------------------------------------------------
-    1. Count the number of observations (returns) for each June date (date_jun) in CRSP data
-       by PERMCO or PERMNO. Augment the FirmCharacteristics.csv table with this information.
+    1. Count the number of observations (returns) for each June date (date_jun) in CRSP data (crspm)
+       by PERMCO or PERMNO. Augment the FirmCharacteristics2.csv table (firmchars) with this information.
+       FirmCharacteristics2.csv contains the firm characteristics for each PERMCO and date_jun 
+       that will be used for sorting and thus creating the Fama-French portfolios.
     2. Apply a rolling window of length 5 (5 years) to sum the number of observations (returns).
        Create a dummy that is 1 if the past 5-year number of observations exceeds the threshold
        and 0 otherwise. This dummy will be used to filter the set of firms (PERMCOs) or securities
@@ -22,15 +24,13 @@ Steps to construct these new Fama-French factors
     3. Iterate through a list of June dates (list of date_jun in ascending order) and 
        apply the FFPortfolios function and get portfolio returns as in FamaFrench2015FF5 with 
        a twist:
-           i. First isolate those entities that existed 5 years before.
-           ii. Isolate 5-year data from the return dataframe (ret_data).
-           iii. Create a new column 'date_jun_5Y' in ret_date which is just the current 
-           date_jun for which we iterate through.
-           iv. Rename 'date_jun' to 'date_jun_5Y' for the filtered FirmCharacterics.csv table 
-           (firmchars).
-           v. Apply FFPortfolios as follows for the HML factor:
+           i. First isolate those entities that existed 5 years before. -> firmchars5Y
+           ii. Isolate 5-year data from the return dataframe (ret_data) -> crspm5Y
+           iii. The date_jun of crspm5Y will be replaced with the value of the portfolio
+           formation date. 
+           iv. Apply FFPortfolios as follows for the HML factor:
                
-sizebtm = FFPortfolios(ret_data, firmchars, entity_id = 'PERMCO', time_id  = 'date_jun_5Y', \
+sizebtm = FFPortfolios(crspm5Y, firmchars5Y, entity_id = 'PERMCO', time_id  = 'date_jun', \
                        ret_time_id = 'date', characteristics = ['CAP', 'BtM'], lagged_periods = [0, 0], \
                        [2, np.array([0, 0.3, 0.7]) ], quantile_filters = [['EXCHCD', 1], ['EXCHCD', 1]], \
                        ffdir = FFDIR, conditional_sort =  False, weight_col = 'CAP')
@@ -49,11 +49,11 @@ sizebtm_p = sizebtm['ports'][sizebtm['ports'].index > sizebtm['num_stocks'].inde
 sizebtm_p['HML_DT97'] = (1/2)*(sizebtm_p['SH'] + sizebtm_p['BH']) - \
                         (1/2)*(sizebtm_p['SL'] + sizebtm_p['BL']) 
                         
-          vi. Save the HML_DT97 in a dataframe that has three columns; 
-          'aate' = monthly or daily returns of the factors 
-          'date_jun_5Y' = current date_jun being iterated
+          v. Save the HML_DT97 in a dataframe that has three columns; 
+          'date' = monthly or daily returns of the factors 
+          'date_jun' = current date_jun being iterated (portfolio formation date as the end of June of year t)
           'HML_DT97' = pre-formation and constant-weight allocation HML factor.
-          vii. Concat all HML_DT97 dataframes on axis = 0. 
+          vi. Concat all HML_DT97 dataframes on axis = 0. 
           
                
 """
@@ -90,7 +90,7 @@ from PortSort import PortSort
 # DT 97 SMB factor
 do_SMB = True
 # DT 97 HML factor
-do_HML = False
+do_HML = True
 # DT 97 RMW factor
 do_RMW = True
 # DT 97 CMA factor
@@ -439,6 +439,7 @@ for formation_date in fdates['date_jun']:
     # ~~~~~~~~~~~~~ 
     
     # Control execution
+    # -----------------
     if do_SMB:
     
         print('SMB factor')
@@ -472,6 +473,7 @@ for formation_date in fdates['date_jun']:
     # ~~~~~~~~~~~~~
     
     # Control execution
+    # -----------------
     if do_HML:
     
         print('HML factor')
@@ -508,6 +510,7 @@ for formation_date in fdates['date_jun']:
     # ~~~~~~~~~~~~~
     
     # Control execution
+    # -----------------
     if do_RMW:
 
         print('RMW factor')
@@ -544,6 +547,7 @@ for formation_date in fdates['date_jun']:
     # ~~~~~~~~~~~~~
     
     # Control execution
+    # -----------------
     if do_CMA:
 
         print('CMA factor')   
@@ -579,28 +583,38 @@ for formation_date in fdates['date_jun']:
 #               PUTTING EVERYTHING TOGETHER AND SAVE                    #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     
+# List to store the Daniel & Titman factors
+l = []
+
 if do_SMB:
     SMB_DT97 =  SMB_DT97.reset_index(drop = True)
     SMB_DT97.to_csv(os.path.join(wdir, 'SMB_DT97.csv'), index = False)
     print('SMB_DT_97 is saved.')
+    # Append to l
+    l.append(SMB_DT97)
 
 if do_HML:
     HML_DT97 =  HML_DT97.reset_index(drop = True)
     HML_DT97.to_csv(os.path.join(wdir, 'HML_DT97.csv'), index = False)
     print('HML_DT_97 is saved.')
+    # Append to l
+    l.append(HML_DT97)
     
 if do_RMW:
     RMW_DT97 =  RMW_DT97.reset_index(drop = True)
     RMW_DT97.to_csv(os.path.join(wdir, 'RMW_DT97.csv'), index = False)
     print('RMW_DT_97 is saved.')
+    # Append to l
+    l.append(RMW_DT97)
 
 if do_CMA:
     CMA_DT97 =  CMA_DT97.reset_index(drop = True)
     CMA_DT97.to_csv(os.path.join(wdir, 'CMA_DT97.csv'), index = False)
     print('CMA_DT_97 is saved.')
+    # Append to l
+    l.append(CMA_DT97)
 
-# Save all in the same dataframe
-l = [SMB_DT97, HML_DT97, RMW_DT97, CMA_DT97]
+
 
 FF5_DT97 = reduce(lambda a, b : pd.merge(a,b, how = 'inner', on = ['date', 'date_jun']), l)
 FF5_DT97.to_csv(os.path.join(wdir, 'FF5_DT97.csv'), index = False)
