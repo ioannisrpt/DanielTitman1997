@@ -88,13 +88,13 @@ from PortSort import PortSort
 # ------------------
 
 # DT 97 SMB factor
-do_SMB = False
+do_SMB = True
 # DT 97 HML factor
-do_HML = False
+do_HML = True
 # DT 97 RMW factor
-do_RMW = False
+do_RMW = True
 # DT 97 CMA factor
-do_CMA = False
+do_CMA = True
 # DT 97 MKT factor
 do_MKT = True
 # Get Figure 1 from Daniel & Titman (1997) paper
