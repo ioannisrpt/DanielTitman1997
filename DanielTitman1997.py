@@ -17,7 +17,7 @@ Logical steps behind the construction of new Fama-French factors
        by PERMCO or PERMNO. Augment the FirmCharacteristics.csv table with this information.
        If a date lies between the start of July of year t and the end of June of year t+1, it is 
        mapped to the end of June of year t+1. Column 'date_jun' contains exactly this mapping. 
-       For example date = 20200801 is mapped to 20210631 and date = 20200532 to 20200631. 
+       For example date = 20200801 is mapped to 20210631 and date = 20200515 to 20200631. 
     2. Apply a rolling window of length 5 (5 years) to sum the number of observations (returns).
        Create a dummy that is 1 if the past 5-year number of observations exceeds the threshold
        and 0 otherwise. This dummy will be used to filter the set of firms (PERMCOs) or securities
