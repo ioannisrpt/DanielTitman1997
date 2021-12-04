@@ -11,8 +11,8 @@ The paper can be found at:
 https://www.jstor.org/stable/2329554?seq=1#metadata_info_tab_contents
 
 
-Steps to construct these new Fama-French factors
-------------------------------------------------
+Logical steps behind the construction of new Fama-French factors
+-----------------------------------------------------------------
     1. Count the number of observations (returns) for each June date (date_jun) in CRSP data
        by PERMCO or PERMNO. Augment the FirmCharacteristics.csv table with this information.
     2. Apply a rolling window of length 5 (5 years) to sum the number of observations (returns).
