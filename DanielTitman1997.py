@@ -24,13 +24,13 @@ Steps to construct these new Fama-French factors
        a twist:
            i. First isolate those entities that existed 5 years before.
            ii. Isolate 5-year data from the return dataframe (ret_data).
-           iii. Create a new column 'date_jun_5Y' in ret_date which is just the current 
-           date_jun for which we iterate through.
-           iv. Rename 'date_jun' to 'date_jun_5Y' for the filtered FirmCharacterics.csv table 
-           (firmchars).
+           iii. Set 'date_jun' as the formation date of the portfolio for the 5-Year filtered
+           return dataset. 
+           iv. The FirmCharacteristics table has already the formation date as 'date_jun' from
+           the filtering procedure.
            v. Apply FFPortfolios as follows for the HML factor:
                
-sizebtm = FFPortfolios(ret_data, firmchars, entity_id = 'PERMCO', time_id  = 'date_jun_5Y', \
+sizebtm = FFPortfolios(ret_data, firmchars, entity_id = 'PERMCO', time_id  = 'date_jun', \
                        ret_time_id = 'date', characteristics = ['CAP', 'BtM'], lagged_periods = [0, 0], \
                        [2, np.array([0, 0.3, 0.7]) ], quantile_filters = [['EXCHCD', 1], ['EXCHCD', 1]], \
                        ffdir = FFDIR, conditional_sort =  False, weight_col = 'CAP')
