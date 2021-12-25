@@ -1,0 +1,546 @@
+# -*- coding: utf-8 -*-
+# Python 3.7.7
+# Pandas 1.0.5
+# Author: Ioannis Ropotos
+
+"""
+Replicate the procedure of creating pre-formation and constant-allocation Fama-French factors as described 
+in Daniel & Titman (1997).
+
+The paper can be found at:
+https://www.jstor.org/stable/2329554?seq=1#metadata_info_tab_contents
+
+
+Logical steps behind the construction of new Fama-French factors
+-----------------------------------------------------------------
+    1. Count the number of observations (returns) for each June date (date_jun) in CRSP data
+       by PERMCO or PERMNO. Augment the FirmCharacteristics.csv table with this information.
+       If a date lies between the start of July of year t and the end of June of year t+1, it is 
+       mapped to the end of June of year t+1. Column 'date_jun' contains exactly this mapping. 
+       For example date = 20200801 is mapped to 20210631 and date = 20200515 to 20200631. 
+    2. Apply a rolling window of length 5 (5 years) to sum the number of observations (returns).
+       Create a dummy that is 1 if the past 5-year number of observations exceeds the threshold
+       and 0 otherwise. This dummy will be used to filter the set of firms (PERMCOs) or securities
+       (PERMNOs) for the construction of the new Fama-French factors.
+    3. Iterate through a list of June dates (list of date_jun in ascending order) and 
+       apply the FFPortfolios function and get portfolio returns as in FamaFrench2015FF5 with 
+       a twist:
+           i. First isolate those entities that existed 5 years before.
+           ii. Isolate 5-year data from the return dataframe (ret_data).
+           iii. Set 'date_jun' as the formation date of the portfolio for the 5-Year filtered
+           return dataset. 
+           iv. The FirmCharacteristics table has already the formation date as 'date_jun' from
+           the filtering procedure.
+           v. Apply FFPortfolios as follows for the HML factor:
+               
+sizebtm = FFPortfolios(ret_data, firmchars, entity_id = 'PERMCO', time_id  = 'date_jun', \
+                       ret_time_id = 'date', characteristics = ['CAP', 'BtM'], lagged_periods = [0, 0], \
+                       [2, np.array([0, 0.3, 0.7]) ], quantile_filters = [['EXCHCD', 1], ['EXCHCD', 1]], \
+                       ffdir = FFDIR, conditional_sort =  False, weight_col = 'CAP')
+               
+# Renaming the portfolios as per Fama & French (2015) 
+# Size : 1 = Small, 2 = Big
+# BtM : 1 = Low, 2 = Neutral, 3 = High
+sizebtm_def = {'1_1' : 'SL', '1_2' : 'SN', '1_3' : 'SH', \
+               '2_1' : 'BL', '2_2' : 'BN', '2_3' : 'BH'}
+    
+# Isolate the portfolios and rename the columns
+# Also drop the first year as defined in the first index element of 'num_stocks'
+sizebtm_p = sizebtm['ports'][sizebtm['ports'].index > sizebtm['num_stocks'].index[0]].copy().rename(columns = sizebtm_def)
+
+# Define the HML factor
+sizebtm_p['HML_DT97'] = (1/2)*(sizebtm_p['SH'] + sizebtm_p['BH']) - \
+                        (1/2)*(sizebtm_p['SL'] + sizebtm_p['BL']) 
+                        
+          vi. Save the HML_DT97 in a dataframe that has three columns; 
+          'aate' = monthly or daily returns of the factors 
+          'date_jun_5Y' = current date_jun being iterated
+          'HML_DT97' = pre-formation and constant-weight allocation HML factor.
+          vii. Concat all HML_DT97 dataframes on axis = 0. 
+          
+               
+"""
+
+
+
+import os
+import pandas as pd
+import numpy as np
+from pandas.tseries.offsets import BYearEnd
+from pandas.tseries.offsets import BMonthEnd
+from functools import reduce
+import matplotlib.pyplot as plt
+# Python time counter 
+from time import perf_counter
+
+
+# Main directory
+wdir = r'C:\Users\ropot\OneDrive\Desktop\Python Scripts\DanielTitman1997'
+os.chdir(wdir)
+# Portfolio directory 
+FFDIR = r'C:\Users\ropot\OneDrive\Desktop\Python Scripts\DanielTitman1997\FFfactorsDT97'
+
+
+# Import the PortSort Class. For more details: 
+# https://github.com/ioannisrpt/PortSort.git 
+from PortSort import PortSort
+
+
+# ------------------
+# Control execution
+# ------------------
+
+# DT 97 SMB factor
+do_SMB = True
+# DT 97 HML factor
+do_HML = True
+# DT 97 RMW factor
+do_RMW = True
+# DT 97 CMA factor
+do_CMA = True
+# DT 97 MKT factor
+do_MKT = True
+# Get Figure 1 from Daniel & Titman (1997) paper
+do_figure1 = True
+
+
+# -------------------------------------------------------------------------------------
+#                FUNCTIONS - START
+# ------------------------------------------------------------------------------------
+
+
+def WeightedMean(x, df, weights):
+    """
+    Define the weighted mean function
+    """
+    return np.average(x, weights = df.loc[x.index, weights])
+
+def is_number(s):
+    """
+    Function that checks if a string is a number    
+    """
+    # Try converting the string to float number. 
+    try:
+        float(s)
+        return True
+    # If the conversion fails, a ValueError is raised so
+    # we know that the string is not a float number.
+    except ValueError:
+        return False
+    
+    
+    
+def ForceDatetime(x, force_value, date_format = '%Y%m%d'):
+    """
+    Function that converts a variable to a datetime object. If the conversion is not 
+    possible, force_value is applied.
+
+    """
+    try:
+        return pd.to_datetime(x, format = date_format)
+    except ValueError:
+        return force_value
+    
+    
+    
+def JuneScheme(x, num_format = False):
+    """
+    Use the June-June scheme as in Fama-French.
+    
+    x must be a datetime object
+    """
+    # Get month and year
+    month = x.month
+    year = x.year
+    if month <= 6:
+        # New date in string format 
+        june_dt = '%s-06-01' % year
+        y = pd.to_datetime(june_dt, format = '%Y-%m-%d')
+        if num_format:
+            return BMonthEnd().rollforward(y).strftime('%Y%m%d')
+        else:
+            return BMonthEnd().rollforward(y)
+    else:
+        nyear = year + 1
+        # New date in string format 
+        june_dt = '%s-06-01' % nyear
+        y = pd.to_datetime(june_dt, format = '%Y-%m-%d')
+        if num_format:
+            return BMonthEnd().rollforward(y).strftime('%Y%m%d')
+        else:
+            return BMonthEnd().rollforward(y)
+        
+        
+    
+
+# Compounded return from returns with a threshold for not null returns
+def compReturn(returns, threshold = 0):
+    # Maybe change in "if not returns:" ?
+    if not returns.empty:
+        if pd.notnull(returns).sum() >= threshold:
+            return ((returns + 1).prod()) - 1
+        else:
+            return np.nan
+    else:
+        return np.nan
+    
+# -------------------------------------------------------------------------------------
+#                FUNCTIONS - END
+# ------------------------------------------------------------------------------------ 
+
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#                      IMPORT-FORMAT DATA                               #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+# ---------
+# CRSP data
+# ---------
+
+# Import CRSP monthly data used for extracting the returns of the Fama-French factors
+crsp = pd.read_csv(os.path.join(wdir, 'CRSPmonthlydata1963.csv'))
+# Keep only certain columns
+crspm = crsp[['PERMCO', 'date', 'RET', 'date_jun']].copy()
+del crsp
+
+# Show the format of crspm
+print(crspm.head(15))
+
+# --------------------
+# FIRM CHARACTERISTICS
+# --------------------
+
+# Import FirmCharacteristics table used for sorting stocks in portfolios as created from
+# FamaFrench2015FF5.
+firmchars = pd.read_csv(os.path.join(wdir, 'FirmCharacteristics2.csv'))
+# Sort values to make sure that sorting and everything else will be working as intended 
+firmchars = firmchars.sort_values(by = ['PERMCO', 'date_jun'])
+
+
+# --------------------
+#  FAMA-FRENCH FACTORS
+# --------------------
+
+# Import the five Fama-French factors 
+ff5 = pd.read_csv(os.path.join(wdir, 'FF5_monthly.csv')).dropna().astype({'date' : np.int64})
+
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#            CALCULATE NUMBER OF RETURN OBSERVATIONS                    #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+
+# Get number of observations from CRSP data
+num_ret = crspm.groupby(['PERMCO', 'date_jun'])['RET'].count().reset_index().rename(columns = {'RET' : 'NUM_RET'})
+# Merge with firmchars
+firmchars = pd.merge(firmchars, num_ret, on = ['PERMCO', 'date_jun'])
+# Calculate the 5-Year number of valid return observations
+firmchars['NUM_RET_5Y'] = firmchars.groupby('PERMCO')['NUM_RET'].transform(lambda s: s.rolling(5).sum())
+# Create a dummy to check if NUM_RET_5Y exceeds threshold
+firmchars['exists_5Y'] = firmchars['NUM_RET_5Y'].apply(lambda x: 1 if x >= 58 else 0)
+
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#             ISOLATE THE FORMATION AND HOLDING DATES                   #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Isolate the formation dates which coincide with date_jun
+fdates = pd.DataFrame(data = firmchars['date_jun'].drop_duplicates().sort_values().reset_index(drop = True), columns = ['date_jun'])
+# Get the holding date 5 years before
+fdates['date_hold'] = fdates['date_jun'].shift(4)
+# Isolate only the valid formation and holding dates
+fdates = fdates.dropna().reset_index(drop = True).astype({'date_hold' : np.int64})
+# Drop the last formation date which corresponds to 20210630 
+fdates = fdates.iloc[:-1]
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#                DANIEL & TITMAN (1997) METHODOLOGY                     #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+# Save the DT97 factors in dataframes
+SMB_DT97 = pd.DataFrame()
+HML_DT97 = pd.DataFrame()
+RMW_DT97 = pd.DataFrame()
+CMA_DT97 = pd.DataFrame()
+MKT_DT97 = pd.DataFrame()
+
+
+# Iterate through the formation dates
+for formation_date in fdates['date_jun']:
+    
+    print('---- %d -----' % formation_date)
+    # Get the holding date
+    hold_date = fdates.loc[fdates['date_jun'] == formation_date, 'date_hold'].values[0]
+    
+    # Isolate the firmchars of the entities that existed 5 years before given the formation date
+    firmchars5Y = firmchars[ (firmchars['exists_5Y'] == 1) & (firmchars['date_jun'] == formation_date )].copy()
+    # Isolate the entities themselves
+    entities5Y = list(firmchars5Y['PERMCO'].drop_duplicates().values)
+    
+    # Isolate the return data of the same entities
+    crspm5Y = crspm[ (crspm['PERMCO'].isin(entities5Y) ) &  (hold_date <= crspm['date_jun']) & ( crspm['date_jun']<= formation_date ) ].copy()
+    
+    # Replace the values of the 'date_jun' column with formation_date so that FFPortfolios will work
+    # as intended in the context of the construction of the new Fama-French factors
+    crspm5Y['date_jun'] = formation_date
+    
+    # Define the PortSort class 
+    portchar = PortSort(df = firmchars5Y, entity_id = 'PERMCO', time_id = 'date_jun', \
+                        save_dir = wdir)
+    
+
+    
+    # ~~~~~~~~~~~~~
+    # SMB FACTOR  #
+    # ~~~~~~~~~~~~~ 
+    
+    # Control execution
+    # -----------------
+    if do_SMB:
+    
+        print('SMB factor')
+        
+        # Create the 2 Size portfolios 
+        portchar.FFPortfolios(ret_data = crspm5Y, ret_time_id = 'date', FFcharacteristics = ['CAP'],\
+                              FFlagged_periods = [0], FFn_portfolios = [2], FFquantile_filters = [['EXCHCD', 1]],\
+                                  weight_col = 'CAP', FFsave = False)
+        
+        # Renaming the portfolios as per Fama & French (2015) 
+        # Size : 1 = Small, 2 = Big
+        size_def = {1 : 'S', 2 : 'B'}
+        
+        
+            
+        # Isolate the portfolios and rename the columns
+        size_p = portchar.FFportfolios.copy().rename(columns = size_def)
+        
+        # Define the SMB factor (simplest form)
+        size_p['SMB_DT97']  = size_p['S'] - size_p['B']
+        
+        # Put the new SMB factor in a DataFrame
+        smb_DT97 = pd.DataFrame(data = size_p['SMB_DT97'].reset_index())
+        smb_DT97['date_jun'] = formation_date
+        # and concat    
+        SMB_DT97 = pd.concat([SMB_DT97, smb_DT97], axis = 0)    
+        
+    # ~~~~~~~~~~~~~
+    # HML FACTOR  #
+    # ~~~~~~~~~~~~~
+    
+    # Control execution
+    # -----------------
+    if do_HML:
+    
+        print('HML factor')
+        
+        # Create the 2x3 Size and Book-to-Market portfolios 
+        portchar.FFPortfolios(ret_data = crspm5Y, ret_time_id = 'date', FFcharacteristics = ['CAP', 'BtM'],\
+                              FFlagged_periods = [0, 0], FFn_portfolios = [2, np.array([0, 0.3, 0.7])], \
+                              FFquantile_filters = [['EXCHCD', 1], ['EXCHCD', 1] ], weight_col = 'CAP', \
+                              FFsave = False)
+        
+                   
+        # Renaming the portfolios as per Fama & French (2015) 
+        # Size : 1 = Small, 2 = Big
+        # BtM : 1 = Low, 2 = Neutral, 3 = High
+        sizebtm_def = {'1_1' : 'SL', '1_2' : 'SN', '1_3' : 'SH', \
+                       '2_1' : 'BL', '2_2' : 'BN', '2_3' : 'BH'}
+        
+        # Isolate the portfolios and rename the columns
+        sizebtm_p = portchar.FFportfolios.copy().rename(columns = sizebtm_def)
+        
+        # Define the HML factor
+        sizebtm_p['HML_DT97'] = (1/2)*(sizebtm_p['SH'] + sizebtm_p['BH']) - \
+                                (1/2)*(sizebtm_p['SL'] + sizebtm_p['BL']) 
+                                
+                                
+        # Put the new HML factor in a DataFrame
+        hml_DT97 = pd.DataFrame(data = sizebtm_p['HML_DT97'].reset_index())
+        hml_DT97['date_jun'] = formation_date
+        # and concat
+        HML_DT97 = pd.concat([HML_DT97, hml_DT97], axis = 0)
+    
+    
+    # ~~~~~~~~~~~~~
+    # RMW FACTOR  #
+    # ~~~~~~~~~~~~~
+    
+    # Control execution
+    # -----------------
+    if do_RMW:
+
+        print('RMW factor')
+        
+        # Create the 2x3 Size and Profitability portfolios 
+        portchar.FFPortfolios(ret_data = crspm5Y, ret_time_id = 'date', FFcharacteristics = ['CAP', 'OP'],\
+                      FFlagged_periods = [0, 0], FFn_portfolios = [2, np.array([0, 0.3, 0.7])], \
+                      FFquantile_filters = [['EXCHCD', 1], ['EXCHCD', 1] ], weight_col = 'CAP', \
+                      FFsave = False)    
+    
+    
+        
+        # Renaming the portfolios as per Fama & French (2015) 
+        # Size : 1 = Small, 2 = Big
+        # OP : 1 = Weak, 2 = Neutral, 3 = Robust
+        sizermw_def = {'1_1' : 'SW', '1_2' : 'SN', '1_3' : 'SR', \
+                       '2_1' : 'BW', '2_2' : 'BN', '2_3' : 'BR'}
+        
+        # Isolate the portfolios and rename the columns
+        sizermw_p = portchar.FFportfolios.copy().rename(columns = sizermw_def)
+    
+        # Define the RMW factor
+        sizermw_p['RMW_DT97'] = (1/2)*(sizermw_p['SR'] + sizermw_p['BR']) - \
+                                (1/2)*(sizermw_p['SW'] + sizermw_p['BW'])   
+                             
+                             
+        # Put the new HML factor in a DataFrame
+        rmw_DT97 = pd.DataFrame(data = sizermw_p['RMW_DT97'].reset_index())
+        rmw_DT97['date_jun'] = formation_date
+        # and concat
+        RMW_DT97 = pd.concat([RMW_DT97, rmw_DT97], axis = 0)
+    
+    # ~~~~~~~~~~~~~
+    # CMA FACTOR  #
+    # ~~~~~~~~~~~~~
+    
+    # Control execution
+    # -----------------
+    if do_CMA:
+
+        print('CMA factor')   
+     
+        # Create the 2x3 Size and Investment portfolios 
+        portchar.FFPortfolios(ret_data = crspm5Y, ret_time_id = 'date', FFcharacteristics = ['CAP', 'INV'],\
+                              FFlagged_periods = [0, 0], FFn_portfolios = [2, np.array([0, 0.3, 0.7])], \
+                              FFquantile_filters = [['EXCHCD', 1], ['EXCHCD', 1] ], weight_col = 'CAP', \
+                              FFsave = False)
+            
+        
+        # Renaming the portfolios as per Fama & French (2015) 
+        # Size : 1 = Small, 2 = Big
+        # INV : 1 = Conservative, 2 = Neutral, 3 = Aggressive
+        sizecma_def = {'1_1' : 'SC', '1_2' : 'SN', '1_3' : 'SA', \
+                       '2_1' : 'BC', '2_2' : 'BN', '2_3' : 'BA'}
+        
+        # Isolate the portfolios and rename the columns
+        sizecma_p = portchar.FFportfolios.copy().rename(columns = sizecma_def)
+    
+        # Define the CMA factor
+        sizecma_p['CMA_DT97'] = (1/2)*(sizecma_p['SC'] + sizecma_p['BC']) - \
+                             (1/2)*(sizecma_p['SA'] + sizecma_p['BA'])      
+    
+        
+        # Put the new HML factor in a DataFrame
+        cma_DT97 = pd.DataFrame(data = sizecma_p['CMA_DT97'].reset_index())
+        cma_DT97['date_jun'] = formation_date
+        # and concat
+        CMA_DT97 = pd.concat([CMA_DT97, cma_DT97], axis = 0)
+        
+        
+    # ~~~~~~~~~~~~~
+    # MKT FACTOR  #
+    # ~~~~~~~~~~~~~ 
+    
+    # Control execution
+    # -----------------
+    if do_MKT:
+    
+        print('MKT factor')
+        
+        # Get the market capitalization (CAP) of all stocks existing for 5 years 
+        crspmkt = pd.merge(crspm5Y, firmchars5Y[['date_jun', 'PERMCO', 'CAP']], on = ['date_jun', 'PERMCO']).dropna()
+        
+        # Calculate the market return 
+        mkt_DT97 = crspmkt.groupby(by = 'date').agg( {'RET' : lambda x: WeightedMean(x, df=crspmkt, weights = 'CAP') } )
+        # Rename the column
+        mkt_DT97.columns = ['MKT_DT97']    
+        # Get the excess return of the market portfolio
+        mkt_DT97 = mkt_DT97.join(ff5.set_index('date')['RF'])
+        mkt_DT97['MKT_DT97'] = mkt_DT97['MKT_DT97']  - mkt_DT97['RF']
+        
+        # Restructure the DataFrame
+        mkt_DT97 = mkt_DT97['MKT_DT97'].reset_index()
+        mkt_DT97['date_jun'] = formation_date
+        # and concat    
+        MKT_DT97 = pd.concat([MKT_DT97, mkt_DT97], axis = 0)    
+        
+    
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#               PUTTING EVERYTHING TOGETHER AND SAVE                    #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# List to save all 
+l = []
+    
+if do_SMB:
+    SMB_DT97 =  SMB_DT97.reset_index(drop = True)
+    SMB_DT97.to_csv(os.path.join(wdir, 'SMB_DT97.csv'), index = False)
+    print('SMB_DT_97 is saved.')
+    l.append(SMB_DT97)
+
+if do_HML:
+    HML_DT97 =  HML_DT97.reset_index(drop = True)
+    HML_DT97.to_csv(os.path.join(wdir, 'HML_DT97.csv'), index = False)
+    print('HML_DT_97 is saved.')
+    l.append(HML_DT97)
+    
+if do_RMW:
+    RMW_DT97 =  RMW_DT97.reset_index(drop = True)
+    RMW_DT97.to_csv(os.path.join(wdir, 'RMW_DT97.csv'), index = False)
+    print('RMW_DT_97 is saved.')
+    l.append(RMW_DT97)
+
+if do_CMA:
+    CMA_DT97 =  CMA_DT97.reset_index(drop = True)
+    CMA_DT97.to_csv(os.path.join(wdir, 'CMA_DT97.csv'), index = False)
+    print('CMA_DT_97 is saved.')
+    l.append(CMA_DT97)
+    
+if do_MKT:
+    MKT_DT97 =  MKT_DT97.reset_index(drop = True)
+    MKT_DT97.to_csv(os.path.join(wdir, 'MKT_DT97.csv'), index = False)
+    print('MKT_DT_97 is saved.') 
+    l.append(MKT_DT97)
+
+
+FF5_DT97 = reduce(lambda a, b : pd.merge(a,b, how = 'inner', on = ['date', 'date_jun']), l)
+FF5_DT97.to_csv(os.path.join(wdir, 'FF5_DT97.csv'), index = False)
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#              FIGURE 1 IN DANIEL & TITMAN (1997) PAPER                 #
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Control execution
+if do_figure1:
+    
+    # Import the FF5_DT97
+    FF5_DT97 = pd.read_csv(os.path.join(wdir, 'FF5_DT97.csv'))
+    
+    
+    # Function that returns the number of months between 2 dates
+    def num_months(startdt, enddt):
+        startdt = pd.to_datetime(startdt, format = '%Y%m%d')
+        enddt = pd.to_datetime(enddt, format = '%Y%m%d')
+        return (enddt.year - startdt.year)*12 + enddt.month - startdt.month   
+    
+    # Define the number of months before the formation date
+    FF5_DT97['Months_before'] = - FF5_DT97.apply(lambda x: num_months(x['date'], x['date_jun']), axis = 1)
+
+    # Get the average monthly return for the DT97 HML factor
+    hml_ret = FF5_DT97.groupby('Months_before')['HML_DT97'].mean()
+    
+    # Plot 
+    plt.figure()
+    hml_ret.plot()
+    plt.xlabel('Months before the formation date')
+    plt.ylabel('Monthly return')
+    plt.savefig(os.path.join(wdir, 'Figure_1_DanielTitman97.png'))
+    plt.close()
