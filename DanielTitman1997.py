@@ -83,7 +83,7 @@ FFDIR = r'C:\Users\ropot\OneDrive\Desktop\Python Scripts\DanielTitman1997\FFfact
 
 # Import the PortSort Class. For more details: 
 # https://github.com/ioannisrpt/PortSort.git 
-from PortSort import PortSort
+from PortSort import PortSort as ps
 
 
 # ------------------
@@ -292,7 +292,7 @@ for formation_date in fdates['date_jun']:
     crspm5Y['date_jun'] = formation_date
     
     # Define the PortSort class 
-    portchar = PortSort(df = firmchars5Y, entity_id = 'PERMCO', time_id = 'date_jun', \
+    portchar = ps.PortSort(df = firmchars5Y, entity_id = 'PERMCO', time_id = 'date_jun', \
                         save_dir = wdir)
     
 
