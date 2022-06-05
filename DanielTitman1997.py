@@ -4,8 +4,9 @@
 # Author: Ioannis Ropotos
 
 """
-Replicate the procedure of creating pre-formation and constant-allocation Fama-French factors as described 
-in Daniel & Titman (1997).
+Replicate the procedure of creating pre-formation and constant-allocation 
+Fama-French factors as described in Daniel & Titman (1997) - 
+Evidence on the Characteristics of Cross Sectional Variation in Stock Returns.
 
 The paper can be found at:
 https://www.jstor.org/stable/2329554?seq=1#metadata_info_tab_contents
@@ -110,13 +111,13 @@ import numpy as np
 from functools import reduce
 import matplotlib.pyplot as plt
 # Import the PortSort Class. For more details: 
-# https://github.com/ioannisrpt/PortSort.git 
-from PortSort import PortSort as ps
+# https://github.com/ioannisrpt/portsort.git 
+from portsort import portsort as ps
 
 
 
 # Main directory (Change it)
-wdir = r'C:\Users\ropot\Desktop\Python Scripts\DanielTitman1997'
+wdir = r'C:\Users\ropot\Desktop\Python Scripts\DanielTitman1997 Git\DanielTitman1997'
 os.chdir(wdir)
 # Fama-French portfolio directory 
 ff_folder = 'FF5_portfolios'
@@ -144,9 +145,9 @@ do_MKT = True
 do_figure1 = True
 
 
-# -------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 #                FUNCTIONS - START
-# ------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -166,32 +167,6 @@ def WeightedMean(x, df, weights):
     return np.average(ma_x, weights = ma_w)
 
 
-
-def is_number(s):
-    """
-    Function that checks if a string is a number    
-    """
-    # Try converting the string to float number. 
-    try:
-        float(s)
-        return True
-    # If the conversion fails, a ValueError is raised so
-    # we know that the string is not a float number.
-    except ValueError:
-        return False
-    
-    
-    
-def ForceDatetime(x, force_value, date_format = '%Y%m%d'):
-    """
-    Function that converts a variable to a datetime object. If the conversion is not 
-    possible, force_value is applied.
-
-    """
-    try:
-        return pd.to_datetime(x, format = date_format)
-    except ValueError:
-        return force_value
     
   
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -234,27 +209,11 @@ def ApplyJuneScheme(df, date_col = 'date', date_format = '%Y%m%d'):
     return df
    
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#   COMPOUNDING RETURNS      #
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# Compounded return from returns with a threshold for not null returns
-def compReturn(returns, threshold = 0):
-    # Maybe change in "if not returns:" ?
-    if not returns.empty:
-        if pd.notnull(returns).sum() >= threshold:
-            return ((returns + 1).prod()) - 1
-        else:
-            return np.nan
-    else:
-        return np.nan
- 
-    
-
-    
-# -------------------------------------------------------------------------------------
+       
+# -----------------------------------------------------------------------------
 #                FUNCTIONS - END
-# ------------------------------------------------------------------------------------ 
+# -----------------------------------------------------------------------------
 
 
 
@@ -317,10 +276,6 @@ ftotype32 = {'GVKEY' : np.float32,
              'BtM' : np.float32}
              
 
-
-
-
-#firmchars = pd.read_csv(os.path.join(wdir, 'FirmCharacteristics2.csv')).astype(ftotype32)
 firmchars = pd.read_csv(os.path.join(wdir, 'FirmCharacteristicsFF5_last_traded.csv')).astype(ftotype32)
 # Drop any other column that is not in ftotype32 keys
 drop_fcols = list( set(firmchars.columns) - set(list(ftotype32.keys())) )
@@ -447,15 +402,15 @@ for formation_date in fdates['date_jun']:
         print('SMB factor')
         
         # Create the 2 Size portfolios 
-        portchar.FFPortfolios(ret_data = crspm5Y, 
+        portchar.ff_portfolios(ret_data = crspm5Y, 
                               ret_time_id = 'date_m', 
-                              FFcharacteristics = ['ME'], 
-                              FFlagged_periods = [0],
-                              FFn_portfolios = [2], 
-                              FFquantile_filters = [['NYSE', 1]],
+                              ff_characteristics = ['ME'], 
+                              ff_lagged_periods = [0],
+                              ff_n_portfolios = [2], 
+                              ff_quantile_filters = [['NYSE', 1]],
                               weight_col = 'CAP',
                               return_col = 'RET',
-                              FFsave = False)
+                              ff_save = False)
         
         # Renaming the portfolios as per Fama & French (2015) 
         # Size : 1 = Small, 2 = Big
@@ -464,7 +419,7 @@ for formation_date in fdates['date_jun']:
         
             
         # Isolate the portfolios and rename the columns
-        size_p = portchar.FFportfolios.copy().rename(columns = size_def)
+        size_p = portchar.portfolios.copy().rename(columns = size_def)
         
         # Define the SMB factor (simplest form)
         size_p['SMB_DT97']  = size_p['S'] - size_p['B']
@@ -486,15 +441,15 @@ for formation_date in fdates['date_jun']:
         print('HML factor')
         
         # Create the 2x3 Size and Book-to-Market portfolios 
-        portchar.FFPortfolios(ret_data = crspm5Y,
+        portchar.ff_portfolios(ret_data = crspm5Y,
                               ret_time_id = 'date_m',
-                              FFcharacteristics = ['ME', 'BtM'],
-                              FFlagged_periods = [0, 0],
-                              FFn_portfolios = [2, np.array([0, 0.3, 0.7])], 
-                              FFquantile_filters = [['NYSE', 1], ['NYSE', 1] ],
+                              ff_characteristics = ['ME', 'BtM'],
+                              ff_lagged_periods = [0, 0],
+                              ff_n_portfolios = [2, np.array([0, 0.3, 0.7])], 
+                              ff_quantile_filters = [['NYSE', 1], ['NYSE', 1] ],
                               weight_col = 'CAP', 
                               return_col = 'RET',
-                              FFsave = False)
+                              ff_save = False)
         
                    
         # Renaming the portfolios as per Fama & French (2015) 
@@ -504,7 +459,7 @@ for formation_date in fdates['date_jun']:
                        '2_1' : 'BL', '2_2' : 'BN', '2_3' : 'BH'}
         
         # Isolate the portfolios and rename the columns
-        sizebtm_p = portchar.FFportfolios.copy().rename(columns = sizebtm_def)
+        sizebtm_p = portchar.portfolios.copy().rename(columns = sizebtm_def)
         
         # Define the HML factor
         sizebtm_p['HML_DT97'] = (1/2)*(sizebtm_p['SH'] + sizebtm_p['BH']) - \
@@ -529,15 +484,15 @@ for formation_date in fdates['date_jun']:
         print('RMW factor')
         
         # Create the 2x3 Size and Profitability portfolios 
-        portchar.FFPortfolios(ret_data = crspm5Y, 
+        portchar.ff_portfolios(ret_data = crspm5Y, 
                               ret_time_id = 'date_m', 
-                              FFcharacteristics = ['ME', 'OP'],
-                              FFlagged_periods = [0, 0], 
-                              FFn_portfolios = [2, np.array([0, 0.3, 0.7])], 
-                              FFquantile_filters = [['NYSE', 1], ['NYSE', 1] ],
+                              ff_characteristics = ['ME', 'OP'],
+                              ff_lagged_periods = [0, 0], 
+                              ff_n_portfolios = [2, np.array([0, 0.3, 0.7])], 
+                              ff_quantile_filters = [['NYSE', 1], ['NYSE', 1] ],
                               weight_col = 'CAP', 
                               return_col = 'RET',
-                              FFsave = False)  
+                              ff_save = False)  
     
     
         
@@ -548,7 +503,7 @@ for formation_date in fdates['date_jun']:
                        '2_1' : 'BW', '2_2' : 'BN', '2_3' : 'BR'}
         
         # Isolate the portfolios and rename the columns
-        sizermw_p = portchar.FFportfolios.copy().rename(columns = sizermw_def)
+        sizermw_p = portchar.portfolios.copy().rename(columns = sizermw_def)
     
         # Define the RMW factor
         sizermw_p['RMW_DT97'] = (1/2)*(sizermw_p['SR'] + sizermw_p['BR']) - \
@@ -572,15 +527,15 @@ for formation_date in fdates['date_jun']:
         print('CMA factor')   
      
         # Create the 2x3 Size and Investment portfolios 
-        portchar.FFPortfolios(ret_data = crspm5Y,
+        portchar.ff_portfolios(ret_data = crspm5Y,
                               ret_time_id = 'date_m',
-                              FFcharacteristics = ['ME', 'INV'],
-                              FFlagged_periods = [0, 0], 
-                              FFn_portfolios = [2, np.array([0, 0.3, 0.7])], 
-                              FFquantile_filters = [['NYSE', 1], ['NYSE', 1] ],
+                              ff_characteristics = ['ME', 'INV'],
+                              ff_lagged_periods = [0, 0], 
+                              ff_n_portfolios = [2, np.array([0, 0.3, 0.7])], 
+                              ff_quantile_filters = [['NYSE', 1], ['NYSE', 1] ],
                               weight_col = 'CAP', 
                               return_col = 'RET',
-                              FFsave = False)
+                              ff_save = False)
     
         
         # Renaming the portfolios as per Fama & French (2015) 
@@ -590,7 +545,7 @@ for formation_date in fdates['date_jun']:
                        '2_1' : 'BC', '2_2' : 'BN', '2_3' : 'BA'}
         
         # Isolate the portfolios and rename the columns
-        sizecma_p = portchar.FFportfolios.copy().rename(columns = sizecma_def)
+        sizecma_p = portchar.portfolios.copy().rename(columns = sizecma_def)
     
         # Define the CMA factor
         sizecma_p['CMA_DT97'] = (1/2)*(sizecma_p['SC'] + sizecma_p['BC']) - \
